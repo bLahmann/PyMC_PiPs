@@ -57,6 +57,7 @@ def parse_angular_dist_data(angular_dist_data):
     lct = angular_dist_data[1][3]
 
     # TODO: Support for other modes
+    print(ltt, lct)
     if ltt != 1 or lct != 2:
         return None
 
@@ -165,6 +166,7 @@ class ENDFData:
 
         if angular_dist_data:
             x, y = parse_angular_dist_data(angular_dist_data)
+            print(x, y)
             self.angular_dist = functools.partial(evaluate_angular_dist, x, y)
 
     def diff_cross_section(self, energy, mu):
@@ -179,6 +181,10 @@ DDp = ENDFData("data/endf/D/D.txt", 600)
 DTn = ENDFData("data/endf/T/D.txt", 50)
 D3Hep = ENDFData("data/endf/3He/D.txt", 600)
 
+# Neutron scatter cross-sections
+nDn = ENDFData("data/endf/D/n.txt", 2)
+nTn = ENDFData("data/endf/T/n.txt", 2)
+n3Hen = ENDFData("data/endf/3He/n.txt", 2)
 
 
 

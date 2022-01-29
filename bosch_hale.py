@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plotter
 import numpy
 
 class CrossSection:
@@ -13,7 +14,7 @@ class CrossSection:
         num = self.a[0] + energy * (self.a[1] + energy * (self.a[2] + energy * (self.a[3] + energy * self.a[4])))
         den = 1.0 + energy * (self.b[0] + energy * (self.b[1] + energy * (self.b[2] + energy * self.b[3])))
         s = num / den
-        return 1e3 * s / (energy * numpy.exp(self.bg * numpy.sqrt(energy)))
+        return 1e-3 * s / (energy * numpy.exp(self.bg / numpy.sqrt(energy)))
 
 
 class Reactivity:
@@ -67,3 +68,21 @@ DTn_reactivity = Reactivity(_DTn_bg, _DTn_mr, _DTn_c)
 D3Hep_reactivity = Reactivity(_D3Hep_bg, _D3Hep_mr, _D3Hep_c)
 DDp_reactivity = Reactivity(_DDp_bg, _DDp_mr, _DDp_c)
 DDn_reactivity = Reactivity(_DDn_bg, _DDn_mr, _DDn_c)
+
+
+# Sanity Check
+if __name__ == "__main__":
+    print("Cross-Section Check (Table VIII)")
+    for s in [DTn_cross_section, D3Hep_cross_section, DDp_cross_section, DDn_cross_section]:
+        x = 1e-3 * numpy.array([3, 4, 5, 6, 7, 8, 9, 10, 12, 15,
+                         20, 30, 40, 50, 60, 70, 80, 100,
+                         120, 140, 150, 200, 250, 300, 400])
+        print(1e3 * s.value(x))
+
+    print("Reactivity Check (Table VIII)")
+    for r in [DTn_reactivity, D3Hep_reactivity, DDp_reactivity, DDn_reactivity]:
+        x = numpy.array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
+             1.0, 1.3, 1.5, 1.8, 2.0, 2.5, 3.0,
+             4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0,
+             20.0, 30.0, 40.0, 50.0])
+        print(r.value(x))
