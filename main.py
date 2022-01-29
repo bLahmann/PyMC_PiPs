@@ -1,16 +1,16 @@
-# This is a sample Python script.
-
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+import matplotlib.pyplot as plotter
+import numpy
+from endf_data import DDn, DDp, DTn, D3Hep
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+fig = plotter.figure()
+ax = fig.add_subplot()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+for data in [DDn, DDp, DTn, D3Hep]:
+    x = numpy.linspace(data.min_cross_section_energy, data.max_cross_section_energy, 100000)
+    y = data.total_cross_section(x)
+    plotter.plot(x, y)
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+plotter.show()
