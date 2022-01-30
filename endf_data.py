@@ -59,7 +59,7 @@ def parse_angular_dist_data(angular_dist_data):
     # TODO: Support for other modes
     print(ltt, lct)
     if ltt != 1 or lct != 2:
-        return None
+        return None, None
 
     i = 4
     energies = []
@@ -160,13 +160,13 @@ class ENDFData:
         if cross_section_data:
             # TODO: the interpolation scheme is defined in the ENDF file
             x, y = parse_cross_sections(cross_section_data)
-            self.total_cross_section = log_interp1d(x, y, fill_value="extrapolate")
+            # self.total_cross_section = log_interp1d(x, y, fill_value="extrapolate")
+            self.total_cross_section = interp1d(x, y, fill_value="extrapolate")
             self.min_cross_section_energy = x[0]
             self.max_cross_section_energy = x[-1]
 
         if angular_dist_data:
             x, y = parse_angular_dist_data(angular_dist_data)
-            print(x, y)
             self.angular_dist = functools.partial(evaluate_angular_dist, x, y)
 
     def diff_cross_section(self, energy, mu):
