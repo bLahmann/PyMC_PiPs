@@ -160,8 +160,8 @@ class ENDFData:
         if cross_section_data:
             # TODO: the interpolation scheme is defined in the ENDF file
             x, y = parse_cross_sections(cross_section_data)
-            # self.total_cross_section = log_interp1d(x, y, fill_value="extrapolate")
-            self.total_cross_section = interp1d(x, y, fill_value="extrapolate")
+            self.total_cross_section = log_interp1d(x, y, fill_value="extrapolate")
+            # self.total_cross_section = interp1d(x, y, fill_value="extrapolate")
             self.min_cross_section_energy = x[0]
             self.max_cross_section_energy = x[-1]
 
