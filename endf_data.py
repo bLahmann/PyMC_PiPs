@@ -23,6 +23,56 @@ def fetch_endf_data(endf_file, mt):
     return cross_section_data, angular_dist_data
 
 
+def get_endf_line_entries(endf_line):
+    return [
+        convert_endf_number(endf_line[0:11]),
+        convert_endf_number(endf_line[11:22]),
+        convert_endf_number(endf_line[22:33]),
+        convert_endf_number(endf_line[33:44]),
+        convert_endf_number(endf_line[44:55]),
+        convert_endf_number(endf_line[55:66]),
+        int(endf_line[66:70]),                  # Target ID
+        int(endf_line[70:72]),                  # MF Number
+        int(endf_line[72:75]),                  # MT Number
+        int(endf_line[75:80])                   # Line Number
+    ]
+
+
+def convert_endf_number(endf_number):
+
+    # Handle the sign
+    sign = +1
+    if endf_number[0] == "-":
+        sign = -1
+    endf_number = endf_number[1:]
+
+    # If it's a positive exponent
+    if "+" in endf_number:
+        temp = endf_number.split("+")
+        try:
+            base = float(temp[0])
+            power = +int(temp[1])
+            return sign * base * 10 ** power
+        except ValueError:
+            return endf_number
+
+    # If it's a negative exponent
+    if "-" in endf_number:
+        temp = endf_number.split("-")
+        try:
+            base = float(temp[0])
+            power = -int(temp[1])
+            return sign * base * 10 ** power
+        except ValueError:
+            return endf_number
+
+    # Check if it's an int before giving up
+    try:
+        return int(endf_number)
+    except ValueError:
+        return endf_number
+
+
 def parse_cross_sections(cross_section_data):
 
     # Parse the header data
@@ -103,94 +153,46 @@ def parse_angular_dist_data(angular_dist_data):
 
         num_sections = angular_dist_data[0][5]
         angular_dist_data = angular_dist_data[2:]
+        endf_interpolation_mus = []
 
         for _ in range(num_sections):
 
             num_points = angular_dist_data[0][5]
             interpolation_energies.append(angular_dist_data[0][1])
-            interpolation_mus.append([])
+            endf_interpolation_mus.append([])
             interpolation_values.append([])
             angular_dist_data = angular_dist_data[2:]
             while len(interpolation_values[-1]) < num_points:
-                interpolation_mus[-1].append(angular_dist_data[0][0])
-                interpolation_mus[-1].append(angular_dist_data[0][2])
-                interpolation_mus[-1].append(angular_dist_data[0][4])
+                endf_interpolation_mus[-1].append(angular_dist_data[0][0])
+                endf_interpolation_mus[-1].append(angular_dist_data[0][2])
+                endf_interpolation_mus[-1].append(angular_dist_data[0][4])
                 interpolation_values[-1].append(angular_dist_data[0][1])
                 interpolation_values[-1].append(angular_dist_data[0][3])
                 interpolation_values[-1].append(angular_dist_data[0][5])
                 angular_dist_data = angular_dist_data[1:]
 
-            while isinstance(interpolation_mus[-1][-1], str):
-                interpolation_mus[-1].pop(-1)
+            while isinstance(endf_interpolation_mus[-1][-1], str):
+                endf_interpolation_mus[-1].pop(-1)
                 interpolation_values[-1].pop(-1)
 
-        # All the mu vectors are generally the same (TODO verify that in code)
-        interpolation_mus = interpolation_mus[0]
+        # The final mu vector should be the most finely divided
+        interpolation_mus = endf_interpolation_mus[-1]
 
         # Create a 2D array for easier interpolation
         interpolation_value_array = numpy.zeros((len(interpolation_energies), len(interpolation_mus)))
         for i in range(len(interpolation_values)):
-            interpolation_value_array[i] = numpy.array(interpolation_values[i])
+            f = interp1d(endf_interpolation_mus[i], interpolation_values[i])
+            interpolation_value_array[i] = f(interpolation_mus)
 
     return coefficient_energies, coefficient_arrays, \
         interpolation_energies, interpolation_mus, interpolation_value_array
-
-
-def get_endf_line_entries(endf_line):
-    return [
-        convert_endf_number(endf_line[0:11]),
-        convert_endf_number(endf_line[11:22]),
-        convert_endf_number(endf_line[22:33]),
-        convert_endf_number(endf_line[33:44]),
-        convert_endf_number(endf_line[44:55]),
-        convert_endf_number(endf_line[55:66]),
-        int(endf_line[66:70]),                  # Target ID
-        int(endf_line[70:72]),                  # MF Number
-        int(endf_line[72:75]),                  # MT Number
-        int(endf_line[75:80])                   # Line Number
-    ]
-
-
-def convert_endf_number(endf_number):
-
-    # Handle the sign
-    sign = +1
-    if endf_number[0] == "-":
-        sign = -1
-    endf_number = endf_number[1:]
-
-    # If it's a positive exponent
-    if "+" in endf_number:
-        temp = endf_number.split("+")
-        try:
-            base = float(temp[0])
-            power = +int(temp[1])
-            return sign * base * 10 ** power
-        except ValueError:
-            return endf_number
-
-    # If it's a negative exponent
-    if "-" in endf_number:
-        temp = endf_number.split("-")
-        try:
-            base = float(temp[0])
-            power = -int(temp[1])
-            return sign * base * 10 ** power
-        except ValueError:
-            return endf_number
-
-    # Check if it's an int before giving up
-    try:
-        return int(endf_number)
-    except ValueError:
-        return endf_number
 
 
 def evaluate_angular_dist(coefficient_energies, coefficient_arrays,
                           interpolation_energies, interpolation_mus, interpolation_values,
                           energies, mus):
 
-    result = numpy.zeros(mus.shape)
+    result = numpy.zeros(numpy.array(mus).shape)
 
     min_interpolation_energy = sys.float_info.max
     if interpolation_energies:
