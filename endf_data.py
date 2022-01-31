@@ -3,6 +3,7 @@ from scipy.special import eval_legendre
 from utils import log_interp1d
 import numpy
 import functools
+import sys
 
 
 def fetch_endf_data(endf_file, mt):
@@ -56,36 +57,83 @@ def parse_angular_dist_data(angular_dist_data):
     li = angular_dist_data[1][2]
     lct = angular_dist_data[1][3]
 
-    # TODO: Support for other modes
-    print(ltt, lct)
-    if ltt != 1 or lct != 2:
-        return None, None
-
-    i = 4
-    energies = []
+    # Parse coefficient data (if applicable)
+    coefficient_energies = []
     coefficients = []
-    while i < len(angular_dist_data):
-        energies.append(angular_dist_data[i][1])
-        num_coefficients = angular_dist_data[i][4]
-
-        coefficients.append([])
-        for j in range(0, num_coefficients):
-            if j % 6 == 0:
-                i += 1
-            coefficients[-1].append(angular_dist_data[i][j % 6])
-
-        i += 1
-
     coefficient_arrays = []
-    for i in range(len(coefficients[-1])):
-        coefficient_arrays.append(numpy.zeros(len(coefficients)))
-        for j in range(len(coefficients)):
-            try:
-                coefficient_arrays[i][j] = coefficients[j][i]
-            except IndexError:
-                pass
+    if ltt == 1 or ltt == 3:
 
-    return 1.0e-6 * numpy.array(energies), coefficient_arrays
+        num_energies = angular_dist_data[3][0]
+        angular_dist_data = angular_dist_data[4:]                   # Remove header
+
+        i = 0
+        while len(coefficient_energies) < num_energies:
+            coefficient_energies.append(angular_dist_data[i][1])
+            num_coefficients = angular_dist_data[i][4]
+
+            coefficients.append([])
+            for j in range(0, num_coefficients):
+                if j % 6 == 0:
+                    i += 1
+                coefficients[-1].append(angular_dist_data[i][j % 6])
+
+            i += 1
+
+        angular_dist_data = angular_dist_data[i:]                   # Remove unneeded data
+
+        # Make arrays for easy interpolation
+        coefficient_arrays = []
+        for i in range(len(coefficients[-1])):
+            coefficient_arrays.append(numpy.zeros(len(coefficients)))
+            for j in range(len(coefficients)):
+                try:
+                    coefficient_arrays[i][j] = coefficients[j][i]
+                except IndexError:
+                    pass
+
+    # Parse interpolation data (if applicable)
+    interpolation_energies = []
+    interpolation_mus = []
+    interpolation_values = []
+    interpolation_value_array = None
+    if ltt == 2 or ltt == 3:
+
+        if ltt == 2:
+            angular_dist_data = angular_dist_data[2:]
+
+        num_sections = angular_dist_data[0][5]
+        angular_dist_data = angular_dist_data[2:]
+
+        for _ in range(num_sections):
+
+            num_points = angular_dist_data[0][5]
+            interpolation_energies.append(angular_dist_data[0][1])
+            interpolation_mus.append([])
+            interpolation_values.append([])
+            angular_dist_data = angular_dist_data[2:]
+            while len(interpolation_values[-1]) < num_points:
+                interpolation_mus[-1].append(angular_dist_data[0][0])
+                interpolation_mus[-1].append(angular_dist_data[0][2])
+                interpolation_mus[-1].append(angular_dist_data[0][4])
+                interpolation_values[-1].append(angular_dist_data[0][1])
+                interpolation_values[-1].append(angular_dist_data[0][3])
+                interpolation_values[-1].append(angular_dist_data[0][5])
+                angular_dist_data = angular_dist_data[1:]
+
+            while isinstance(interpolation_mus[-1][-1], str):
+                interpolation_mus[-1].pop(-1)
+                interpolation_values[-1].pop(-1)
+
+        # All the mu vectors are generally the same (TODO verify that in code)
+        interpolation_mus = interpolation_mus[0]
+
+        # Create a 2D array for easier interpolation
+        interpolation_value_array = numpy.zeros((len(interpolation_energies), len(interpolation_mus)))
+        for i in range(len(interpolation_values)):
+            interpolation_value_array[i] = numpy.array(interpolation_values[i])
+
+    return coefficient_energies, coefficient_arrays, \
+        interpolation_energies, interpolation_mus, interpolation_value_array
 
 
 def get_endf_line_entries(endf_line):
@@ -138,16 +186,27 @@ def convert_endf_number(endf_number):
         return endf_number
 
 
-def evaluate_angular_dist(energies, coefficients, energy, mu):
+def evaluate_angular_dist(coefficient_energies, coefficient_arrays,
+                          interpolation_energies, interpolation_mus, interpolation_values,
+                          energies, mus):
 
-    a = []
-    for i in range(len(coefficients)):
-        f = interp1d(energies, coefficients[i])
-        a.append(f(energy))
+    result = numpy.zeros(mus.shape)
 
-    result = 0.5
-    for l in range(1, len(coefficients)+1):
-        result += (2*l + 1) * a[l-1] * eval_legendre(l, mu)
+    min_interpolation_energy = sys.float_info.max
+    if interpolation_energies:
+        min_interpolation_energy = interpolation_energies[0]
+
+    if coefficient_energies:
+        a = []
+        for i in range(len(coefficient_arrays)):
+            f = interp1d(coefficient_energies, coefficient_arrays[i])
+            a.append(f(energies))
+
+        mask = energies < min_interpolation_energy
+        result[mask] = 0.5
+        for l in range(1, len(coefficient_arrays)+1):
+            norm = (2*l + 1) / 2.0
+            result[mask] += norm * a[l-1] * eval_legendre(l, mus)
 
     return result
 
@@ -166,13 +225,15 @@ class ENDFData:
             self.max_cross_section_energy = x[-1]
 
         if angular_dist_data:
-            x, y = parse_angular_dist_data(angular_dist_data)
-            self.angular_dist = functools.partial(evaluate_angular_dist, x, y)
+            coefficient_energies, coefficient_arrays, interpolation_energies, interpolation_mus, interpolation_values \
+                = parse_angular_dist_data(angular_dist_data)
+            self.angular_dist = functools.partial(evaluate_angular_dist, coefficient_energies, coefficient_arrays,
+                                                  interpolation_energies, interpolation_mus, interpolation_values)
 
     def diff_cross_section(self, energy, mu):
         return self.total_cross_section(energy) * \
-               self.angular_dist(energy, mu) / \
-               (2 * numpy.pi)
+            self.angular_dist(energy, mu) / \
+            (2 * numpy.pi)
 
 
 # Fusion cross-sections
