@@ -1,4 +1,4 @@
-from scipy.interpolate import interp1d, interp2d, griddata
+from scipy.interpolate import interp1d
 from scipy.special import eval_legendre
 from utils import log_interp1d, interp2d_pairs
 import numpy
