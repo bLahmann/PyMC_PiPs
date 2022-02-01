@@ -7,7 +7,7 @@ fig = plotter.figure()
 ax = fig.add_subplot()
 
 counter = 1
-for sig in [nDn]:
+for sig in [nDn, nTn, n3Hen]:
 
     """
     energies = numpy.logspace(-11, 2, 100)
@@ -16,12 +16,11 @@ for sig in [nDn]:
         print("%.4e %.4e" % (energies[i], total[i]))
     """
 
-    E = [1, 10, 100]
-    mu = [0, 0, 0]
+    mu = numpy.linspace(-1, 1, 1000)
+    E = 1000 * numpy.ones(mu.shape)
     y = sig.diff_cross_section(E, mu)
     plotter.plot(mu, y, label=counter)
     counter += 1
-    print(2*numpy.pi*integrate(y, mu), sig.total_cross_section(E))
 
 # ax.set_xscale("log")
 ax.set_yscale("log")

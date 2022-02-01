@@ -1,6 +1,6 @@
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, interp2d, griddata
 from scipy.special import eval_legendre
-from utils import log_interp1d
+from utils import log_interp1d, interp2d_pairs
 import numpy
 import functools
 import sys
@@ -184,31 +184,42 @@ def parse_angular_dist_data(angular_dist_data):
             f = interp1d(endf_interpolation_mus[i], interpolation_values[i])
             interpolation_value_array[i] = f(interpolation_mus)
 
-    return coefficient_energies, coefficient_arrays, \
-        interpolation_energies, interpolation_mus, interpolation_value_array
+    return 1.0e-6 * numpy.array(coefficient_energies), coefficient_arrays, \
+        1.0e-6 * numpy.array(interpolation_energies), interpolation_mus, interpolation_value_array
 
 
 def evaluate_angular_dist(coefficient_energies, coefficient_arrays,
                           interpolation_energies, interpolation_mus, interpolation_values,
                           energies, mus):
 
+    mus = numpy.array(mus)
+    energies = numpy.array(energies)
+
     result = numpy.zeros(numpy.array(mus).shape)
 
     min_interpolation_energy = sys.float_info.max
-    if interpolation_energies:
+    if interpolation_energies.any():
         min_interpolation_energy = interpolation_energies[0]
 
-    if coefficient_energies:
+    # Do coefficients if required
+    mask = energies < min_interpolation_energy
+    if mask.any():
+
         a = []
         for i in range(len(coefficient_arrays)):
-            f = interp1d(coefficient_energies, coefficient_arrays[i])
-            a.append(f(energies))
+            f = interp1d(coefficient_energies, coefficient_arrays[i], fill_value="extrapolate")
+            a.append(f(energies[mask]))
 
-        mask = energies < min_interpolation_energy
         result[mask] = 0.5
         for l in range(1, len(coefficient_arrays)+1):
             norm = (2*l + 1) / 2.0
-            result[mask] += norm * a[l-1] * eval_legendre(l, mus)
+            result[mask] += norm * a[l-1] * eval_legendre(l, mus[mask])
+
+    # Do interpolation if required
+    mask = energies >= min_interpolation_energy
+    if mask.any():
+        f = interp2d_pairs(interpolation_mus, interpolation_energies, interpolation_values)
+        result[mask] = f(mus[mask], energies[mask])
 
     return result
 
