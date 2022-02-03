@@ -1,36 +1,21 @@
-import matplotlib.pyplot as plotter
 import numpy
-
-class CrossSection:
-
-    def __init__(self, bg, a, b):
-        self.bg = bg
-        self.a = a
-        self.b = b
-
-    # Equations 8, 9
-    def value(self, energy_mev):
-        energy = 1.0e3 * energy_mev
-        num = self.a[0] + energy * (self.a[1] + energy * (self.a[2] + energy * (self.a[3] + energy * self.a[4])))
-        den = 1.0 + energy * (self.b[0] + energy * (self.b[1] + energy * (self.b[2] + energy * self.b[3])))
-        s = num / den
-        return 1e-3 * s / (energy * numpy.exp(self.bg / numpy.sqrt(energy)))
+import functools
 
 
-class Reactivity:
+def cross_section(bg, a, b, energy_mev):
+    energy = 1.0e3 * energy_mev
+    num = a[0] + energy * (a[1] + energy * (a[2] + energy * (a[3] + energy * a[4])))
+    den = 1.0 + energy * (b[0] + energy * (b[1] + energy * (b[2] + energy * b[3])))
+    s = num / den
+    return 1e-3 * s / (energy * numpy.exp(bg / numpy.sqrt(energy)))
 
-    def __init__(self, bg, mr, c):
-        self.bg = bg
-        self.mr = mr
-        self.c = c
 
-    # Equations 12, 13, 14
-    def value(self, temperature):
-        num = temperature * (self.c[1] + temperature * (self.c[3] + temperature * self.c[5]))
-        den = 1 + temperature * (self.c[2] + temperature * (self.c[4] + temperature * self.c[6]))
-        theta = temperature / (1 - num / den)
-        xi = (self.bg ** 2.0 / (4.0 * theta)) ** (1.0 / 3.0)
-        return self.c[0] * theta * numpy.sqrt(xi / (self.mr * temperature ** 3.0)) * numpy.exp(-3.0 * xi)
+def reactivity(bg, mr, c, temperature):
+    num = temperature * (c[1] + temperature * (c[3] + temperature * c[5]))
+    den = 1 + temperature * (c[2] + temperature * (c[4] + temperature * c[6]))
+    theta = temperature / (1 - num / den)
+    xi = (bg ** 2.0 / (4.0 * theta)) ** (1.0 / 3.0)
+    return c[0] * theta * numpy.sqrt(xi / (mr * temperature ** 3.0)) * numpy.exp(-3.0 * xi)
 
 
 _DTn_bg = 34.3827
@@ -59,30 +44,30 @@ _DDp_c = [5.65718e-12, 3.41267e-3, 1.99167e-3, 0.0, 1.05060e-5, 0.0, 0.0]
 _DDn_c = [5.43360e-12, 5.85779e-3, 7.68222e-3, 0.0, -2.964e-6, 0.0, 0.0]
 
 
-DTn_cross_section = CrossSection(_DTn_bg, _DTn_a, _DTn_b)
-D3Hep_cross_section = CrossSection(_D3Hep_bg, _D3Hep_a, _D3Hep_b)
-DDp_cross_section = CrossSection(_DDp_bg, _DDp_a, _DDp_b)
-DDn_cross_section = CrossSection(_DDn_bg, _DDn_a, _DDn_b)
+DTn_cross_section = functools.partial(cross_section, _DTn_bg, _DTn_a, _DTn_b)
+D3Hep_cross_section = functools.partial(cross_section, _D3Hep_bg, _D3Hep_a, _D3Hep_b)
+DDp_cross_section = functools.partial(cross_section, _DDp_bg, _DDp_a, _DDp_b)
+DDn_cross_section = functools.partial(cross_section, _DDn_bg, _DDn_a, _DDn_b)
 
-DTn_reactivity = Reactivity(_DTn_bg, _DTn_mr, _DTn_c)
-D3Hep_reactivity = Reactivity(_D3Hep_bg, _D3Hep_mr, _D3Hep_c)
-DDp_reactivity = Reactivity(_DDp_bg, _DDp_mr, _DDp_c)
-DDn_reactivity = Reactivity(_DDn_bg, _DDn_mr, _DDn_c)
+DTn_reactivity = functools.partial(reactivity, _DTn_bg, _DTn_mr, _DTn_c)
+D3Hep_reactivity = functools.partial(reactivity, _D3Hep_bg, _D3Hep_mr, _D3Hep_c)
+DDp_reactivity = functools.partial(reactivity, _DDp_bg, _DDp_mr, _DDp_c)
+DDn_reactivity = functools.partial(reactivity, _DDn_bg, _DDn_mr, _DDn_c)
 
 
 # Sanity Check
 if __name__ == "__main__":
     print("Cross-Section Check (Table VIII)")
-    for s in [DTn_cross_section, D3Hep_cross_section, DDp_cross_section, DDn_cross_section]:
+    for sigma in [DTn_cross_section, D3Hep_cross_section, DDp_cross_section, DDn_cross_section]:
         x = 1e-3 * numpy.array([3, 4, 5, 6, 7, 8, 9, 10, 12, 15,
                          20, 30, 40, 50, 60, 70, 80, 100,
                          120, 140, 150, 200, 250, 300, 400])
-        print(1e3 * s.value(x))
+        print(1e3 * sigma(x))
 
     print("Reactivity Check (Table VIII)")
-    for r in [DTn_reactivity, D3Hep_reactivity, DDp_reactivity, DDn_reactivity]:
+    for sigma_v in [DTn_reactivity, D3Hep_reactivity, DDp_reactivity, DDn_reactivity]:
         x = numpy.array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,
              1.0, 1.3, 1.5, 1.8, 2.0, 2.5, 3.0,
              4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0,
              20.0, 30.0, 40.0, 50.0])
-        print(r.value(x))
+        print(sigma_v(x))

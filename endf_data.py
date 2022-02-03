@@ -1,6 +1,7 @@
 from scipy.interpolate import interp1d
 from scipy.special import eval_legendre
 from utils import log_interp1d, interp2d_pairs
+import matplotlib.pyplot as plotter
 import numpy
 import functools
 import sys
@@ -259,6 +260,54 @@ D3Hep = ENDFData("data/endf/3He/D.txt", 600)
 nDn = ENDFData("data/endf/D/n.txt", 2)
 nTn = ENDFData("data/endf/T/n.txt", 2)
 n3Hen = ENDFData("data/endf/3He/n.txt", 2)
+
+
+# Sanity Checks
+if __name__ == "__main__":
+
+    # plotter.rcParams['text.usetex'] = True
+    fig = plotter.figure()
+    ax = fig.add_subplot()
+
+    for sig in [DDn, DDp, DTn, D3Hep]:
+
+        E = numpy.logspace(-2, 2, 1000)
+        s_t = sig.total_cross_section(E)
+        plotter.plot(E, s_t)
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("Fusion Cross Sections")
+    ax.set_ylabel("\sigma (b)")
+    ax.set_xlabel("Energy (MeV)")
+    plotter.show()
+
+
+    fig = plotter.figure()
+    ax = fig.add_subplot()
+
+    for sig in [nDn, nTn, n3Hen]:
+
+        mu = numpy.linspace(-1, 1, 1000)
+
+        E = 1.0 * numpy.ones(mu.shape)
+        s_d = sig.diff_cross_section(E, mu)
+        plotter.plot(mu, s_d)
+
+        E = 10.0 * numpy.ones(mu.shape)
+        s_d = sig.diff_cross_section(E, mu)
+        plotter.plot(mu, s_d)
+
+        E = 100.0 * numpy.ones(mu.shape)
+        s_d = sig.diff_cross_section(E, mu)
+        plotter.plot(mu, s_d)
+
+    ax.set_yscale("log")
+    ax.set_title("Neutron Scattering Cross Sections")
+    ax.set_ylabel("\sigma (b)")
+    ax.set_xlabel("\cos (\theta)")
+    plotter.show()
+
 
 
 
