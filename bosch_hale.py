@@ -10,12 +10,12 @@ def cross_section(bg, a, b, energy_mev):
     return 1e-3 * s / (energy * numpy.exp(bg / numpy.sqrt(energy)))
 
 
-def reactivity(bg, mr, c, temperature):
-    num = temperature * (c[1] + temperature * (c[3] + temperature * c[5]))
-    den = 1 + temperature * (c[2] + temperature * (c[4] + temperature * c[6]))
-    theta = temperature / (1 - num / den)
+def reactivity(bg, mr, c, temperature_kev):
+    num = temperature_kev * (c[1] + temperature_kev * (c[3] + temperature_kev * c[5]))
+    den = 1 + temperature_kev * (c[2] + temperature_kev * (c[4] + temperature_kev * c[6]))
+    theta = temperature_kev / (1 - num / den)
     xi = (bg ** 2.0 / (4.0 * theta)) ** (1.0 / 3.0)
-    return c[0] * theta * numpy.sqrt(xi / (mr * temperature ** 3.0)) * numpy.exp(-3.0 * xi)
+    return c[0] * theta * numpy.sqrt(xi / (mr * temperature_kev ** 3.0)) * numpy.exp(-3.0 * xi)
 
 
 _DTn_bg = 34.3827
