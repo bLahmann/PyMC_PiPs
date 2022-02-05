@@ -1,7 +1,8 @@
 import numpy as np
 import functools
 from scipy.interpolate import interp1d
-from interpolation import logx_interp1d, logy_interp1d, loglog_interp1d
+from interpolation import logx_interp1d, logy_interp1d, loglog_interp1d, gamow_interp1d
+import matplotlib.pyplot as plotter
 
 
 def _convert_string_to_number(string):
@@ -105,30 +106,34 @@ def _get_cross_section_tables(file, mt):
         interp_indexes.append(cross_section_data[2][2*i])
         interp_method_ids.append(cross_section_data[2][2*i+1])
 
-    # Get the cross section table
-    table = []
+    # Get the cross-section table
+    energies = []
+    cross_sections = []
     for i in range(3, len(cross_section_data)):
-        table.append((cross_section_data[i][0], cross_section_data[i][1]))
-        table.append((cross_section_data[i][2], cross_section_data[i][3]))
-        table.append((cross_section_data[i][4], cross_section_data[i][5]))
+        energies.append(cross_section_data[i][0])
+        energies.append(cross_section_data[i][2])
+        energies.append(cross_section_data[i][4])
+        cross_sections.append(cross_section_data[i][1])
+        cross_sections.append(cross_section_data[i][3])
+        cross_sections.append(cross_section_data[i][5])
 
     # Remove any string entries
-    while isinstance(table[-1][0], str):
-        table.pop(-1)
+    while isinstance(energies[-1], str):
+        energies.pop(-1)
+        cross_sections.pop(-1)
 
     # Divide the table into interpolation sections
-    cross_section_tables = []
-    min_energies = []
-    max_energies = []
+    interp_energies = []
+    interp_cross_sections = []
     for i in range(len(interp_method_ids)):
-        cross_section_tables.append(table[(interp_indexes[i]-1):interp_indexes[i+1]])
-        min_energies.append(cross_section_tables[-1][0][0])
-        max_energies.append(cross_section_tables[-1][-1][0])
+        interp_energies.append(energies[(interp_indexes[i]-1):interp_indexes[i+1]])
+        interp_cross_sections.append(cross_sections[(interp_indexes[i]-1):interp_indexes[i+1]])
 
-    return cross_section_tables, interp_method_ids, min_energies, max_energies
+    return interp_energies, interp_cross_sections, interp_method_ids
 
 
-def _interpolate_cross_section_tables(cross_section_tables, interp_method_ids, min_energies, max_energies, query_energies_mev):
+def _interpolate_cross_section_tables(interp_energies, interp_cross_sections, interp_method_ids, query_energies_mev):
+    """Function that interpolates the cross-section data based on the specified methods"""
 
     interp_methods = {
         1: functools.partial(interp1d, kind="nearest"),
@@ -136,26 +141,97 @@ def _interpolate_cross_section_tables(cross_section_tables, interp_method_ids, m
         3: functools.partial(logx_interp1d, kind="linear"),
         4: functools.partial(logy_interp1d, kind="linear"),
         5: functools.partial(loglog_interp1d, kind="linear"),
+        6: gamow_interp1d
     }
 
     # Init
     E = 1.0e6 * np.array(query_energies_mev)
-    cross_sections = np.empty(E.shape)
-    cross_sections[:] = np.NaN
+    result = np.empty(E.shape)
+    result[:] = np.NaN
 
-    for i in range(len(cross_section_tables)):
+    for i in range(len(interp_energies)):
 
-        mask = min_energies[i] <= E <= max_energies[i]
+        min_mask = E >= interp_energies[i][0]
+        max_mask = E <= interp_energies[i][-1]
+        mask = min_mask * max_mask
+
+        f = interp_methods[interp_method_ids[i]](interp_energies[i], interp_cross_sections[i])
+        result[mask] = f(E[mask])
+
+    return result
 
 
+def _get_angular_dist_tables(file, mt):
+
+    data = _convert_file(file)
+    angular_dist_data = data[4][mt]
+
+    # Header
+    zaid = angular_dist_data[0][0]
+    awr = angular_dist_data[0][1]
+    ltt = angular_dist_data[0][3]
+
+    li = angular_dist_data[1][2]
+    lct = angular_dist_data[1][3]
+
+    nr = angular_dist_data[2][4]
+    np = angular_dist_data[2][5]
+
+    # If applicable, get the coefficient data
     pass
 
 
+def get_cross_section(file, mt):
+    """Returns the cross-section as a function of energy in MeV"""
+    interp_energies, interp_cross_sections, method_ids = _get_cross_section_tables(file, mt)
+    return functools.partial(_interpolate_cross_section_tables, interp_energies, interp_cross_sections, method_ids)
 
-tables, method_ids, min_energies, max_energies = _get_cross_section_tables("./data/endf/D/D.txt", 50)
 
-interp_nearest = functools.partial(interp1d, kind="nearest")
-f = interp_nearest([0, 1, 2, 3], [0, 1, 2, 3])
-print(f([0.1, 0.2, 0.8, 0.9]))
-# _interpolate_cross_section_tables(tables, method_ids, min_energies, max_energies, [0.1, 1, 10])
-print("Hello")
+# Fusion cross-sections
+DDn_cross_section = get_cross_section("data/endf/D/D.txt", 50)
+DDp_cross_section = get_cross_section("data/endf/D/D.txt", 600)
+DTn_cross_section = get_cross_section("data/endf/T/D.txt", 50)
+D3Hep_cross_section = get_cross_section("data/endf/3He/D.txt", 600)
+
+# Neutron scatter cross-sections
+nDn_cross_section = get_cross_section("data/endf/D/n.txt", 2)
+nTn_cross_section = get_cross_section("data/endf/T/n.txt", 2)
+n3Hen_cross_section = get_cross_section("data/endf/3He/n.txt", 2)
+
+
+if __name__ == "__main__":
+
+    _get_angular_dist_tables("data/endf/D/n.txt", 2)
+
+    """
+    fig = plotter.figure()
+    ax = fig.add_subplot()
+
+    for sig in [DDn, DDp, DTn, D3Hep]:
+
+        E = np.logspace(-3, 2, 1000)
+        plotter.plot(E, sig(E))
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("Fusion Cross Sections")
+    ax.set_ylabel("\sigma (b)")
+    ax.set_xlabel("Energy (MeV)")
+    plotter.show()
+
+    fig = plotter.figure()
+    ax = fig.add_subplot()
+
+    for sig in [nDn, nTn, n3Hen]:
+
+        E = np.logspace(-3, 2, 1000)
+        plotter.plot(E, sig(E))
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("Neutron Scatter Cross Sections")
+    ax.set_ylabel("\sigma (b)")
+    ax.set_xlabel("Energy (MeV)")
+    plotter.show()
+    """
+

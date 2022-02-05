@@ -1,3 +1,5 @@
+import functools
+
 import numpy as np
 import scipy.interpolate as si
 from scipy.interpolate import interp1d
@@ -21,23 +23,37 @@ def loglog_interp1d(x, y, kind='linear', fill_value='extrapolate'):
     f = interp1d(log_x, log_y, kind=kind, fill_value=fill_value)
     return lambda z: np.power(10.0, f(np.log10(z)))
 
-def gamow_interp1d(x, y, x_q):
 
-    x = np.array(x)
-    y = np.array(y)
+def gamow_interp1d(x, y):
+    return functools.partial(gamow_interp1d_eval, x, y)
 
-    f = interp1d(x, y, kind="previous")
+
+def gamow_interp1d_eval(x, y, x_q):
+
+    x_array = np.array(x)
+    y_array = np.array(y)
+
+    result = np.empty(x_q.shape)
+    result[:] = np.NaN
+
+    f = interp1d(x_array, y_array, kind="previous")
     y1 = f(x_q)
-    x1 = x[np.searchsorted(y, y1)]
+    x1 = x_array[np.searchsorted(y_array, y1)]
 
-    f = interp1d(x, y, kind="next")
+    f = interp1d(x_array, y_array, kind="next")
     y2 = f(x_q)
-    x2 = x[np.searchsorted(y, y2)]
+    x2 = x_array[np.searchsorted(y_array, y2)]
 
-    b = (np.log(y2 * x2) - np.log(y1 * x1)) / ((1.0 / np.sqrt(x1)) - (1.0 / np.sqrt(x2)))
-    a = x1 * y1 * np.exp(b / np.sqrt(x1))
+    b = np.sqrt(x1*x2) * (np.log(y2) - np.log(y1)) / (np.sqrt(x2) - np.sqrt(x1))
+    a = y1 * np.exp(b / np.sqrt(x1))
 
-    return (a / b) * np.exp(-b/np.sqrt(x_q))
+    mask = np.isin(x_q, x)
+    result[mask] = y1[mask]
+
+    mask = np.invert(mask)
+    result[mask] = a[mask] * np.exp(-b[mask]/np.sqrt(x_q[mask]))
+
+    return result
 
 
 def interp2d_pairs(*args,**kwargs):
@@ -51,6 +67,6 @@ def interp2d_pairs(*args,**kwargs):
     return lambda x,y: interpolant(x,y,si.interp2d(*args,**kwargs))
 
 
-
-y = gamow_interp1d([1., 2., 3.], [3., 4., 5.], [1.5, 2.5])
-pass
+if __name__ == "__main__":
+    y = gamow_interp1d([1., 2., 3.], [3., 4., 5.], np.linspace(1, 2, 20))
+    print(y)
