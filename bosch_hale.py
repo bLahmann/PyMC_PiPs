@@ -3,6 +3,8 @@ import functools
 
 
 def cross_section(bg, a, b, energy_mev):
+    """ Returns the cross-section (in barns) at a give energy (in MeV) defined by the Bosch-Hale Parameterization"""
+
     energy = 1.0e3 * energy_mev
     num = a[0] + energy * (a[1] + energy * (a[2] + energy * (a[3] + energy * a[4])))
     den = 1.0 + energy * (b[0] + energy * (b[1] + energy * (b[2] + energy * b[3])))
@@ -11,6 +13,8 @@ def cross_section(bg, a, b, energy_mev):
 
 
 def reactivity(bg, mr, c, temperature_kev):
+    """ Returns the reactivity (in cm^3/s) at a give temperature (in keV) defined by the Bosch-Hale Parameterization"""
+
     num = temperature_kev * (c[1] + temperature_kev * (c[3] + temperature_kev * c[5]))
     den = 1 + temperature_kev * (c[2] + temperature_kev * (c[4] + temperature_kev * c[6]))
     theta = temperature_kev / (1 - num / den)
@@ -57,7 +61,7 @@ DDn_reactivity = functools.partial(reactivity, _DDn_bg, _DDn_mr, _DDn_c)
 
 # Sanity Check
 if __name__ == "__main__":
-    print("Cross-Section Check (Table VIII)")
+    print("Cross-Section Check (Table V)")
     for sigma in [DTn_cross_section, D3Hep_cross_section, DDp_cross_section, DDn_cross_section]:
         x = 1e-3 * numpy.array([3, 4, 5, 6, 7, 8, 9, 10, 12, 15,
                          20, 30, 40, 50, 60, 70, 80, 100,
