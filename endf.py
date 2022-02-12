@@ -1,18 +1,9 @@
-# Need for core functionality
 import sys
 import numpy
 import functools
 from scipy.interpolate import interp1d
 from scipy.special import eval_legendre
 from interpolation import logx_interp1d, logy_interp1d, loglog_interp1d, gamow_interp1d, interp2d_pairs
-
-# Need for testing
-import time
-import matplotlib.pyplot as plotter
-from bosch_hale import DDn_cross_section as DDn_bosch_hale
-from bosch_hale import DDp_cross_section as DDp_bosch_hale
-from bosch_hale import DTn_cross_section as DTn_bosch_hale
-from bosch_hale import D3Hep_cross_section as D3Hep_bosch_hale
 
 
 def _convert_string_to_number(string):
@@ -378,12 +369,22 @@ n3Hen_diff_cross_section = get_differential_cross_section("data/endf/3He/n.txt",
 # Testing
 if __name__ == "__main__":
 
+    import matplotlib.pyplot as plotter
+    from bosch_hale import DDn_cross_section as DDn_bosch_hale
+    from bosch_hale import DDp_cross_section as DDp_bosch_hale
+    from bosch_hale import DTn_cross_section as DTn_bosch_hale
+    from bosch_hale import D3Hep_cross_section as D3Hep_bosch_hale
+    from bosch_hale import DTn_high_energy_cross_section as DTn_high_energy_bosch_hale
+    from bosch_hale import D3Hep_high_energy_cross_section as D3Hep_high_energy_bosch_hale
+
     # Compare fusion ENDF cross-sections to Bosch Hale
     data = [
         (DDn_cross_section, DDn_bosch_hale, "DDn Cross Section"),
         (DDp_cross_section, DDp_bosch_hale, "DDp Cross Section"),
         (DTn_cross_section, DTn_bosch_hale, "DTn Cross Section"),
-        (D3Hep_cross_section, D3Hep_bosch_hale, "D3Hep Cross Section")
+        (D3Hep_cross_section, D3Hep_bosch_hale, "D3Hep Cross Section"),
+        (DTn_cross_section, DTn_high_energy_bosch_hale, "DTn High Energy Cross Section"),
+        (D3Hep_cross_section, D3Hep_high_energy_bosch_hale, "D3Hep High Energy Cross Section")
     ]
 
     for endf, bosch_hale, title in data:

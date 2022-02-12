@@ -1,5 +1,12 @@
-test = [1, 2, 3]
-test2 = [4, 5, 6]
+from fdint import fdk
+from scipy.integrate import quad
+import numpy
 
-for a, b in zip(test, test2):
-    print(a, b)
+def fermi_integral(x, j):
+    f = lambda t, x, j: t ** j / (numpy.exp(t - x) + 1)
+    return quad(f, 0.0, numpy.infty, (x, j))
+
+
+print(fermi_integral(5.0, 0))
+print(fdk(0, 5.0))
+
