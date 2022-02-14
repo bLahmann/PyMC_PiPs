@@ -1,5 +1,5 @@
 import time
-
+from sampling import make_sampler
 
 def print_loading_message(message, stop):
     while not stop():
@@ -15,6 +15,7 @@ def print_loading_message(message, stop):
 
 
 def construct_radial_distribution(temperature_profiles, number_density_profiles, reactivity):
+
     # Rename for clarity
     n1 = number_density_profiles[0]
     n2 = number_density_profiles[1]

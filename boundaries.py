@@ -1,4 +1,5 @@
 import numpy as np
+import functools
 from utils import print_loading_message
 from threading import Thread
 
@@ -6,26 +7,33 @@ from threading import Thread
 _VERIFICATION_NODES = 1000
 
 
-def verify_boundaries(inner_radius, outer_radius, length):
+def verify_boundaries(boundaries):
 
-    names = ("inner boundary", "outer boundary", "plasma length")
-    funcs = (inner_radius, outer_radius, length)
+    for i in range(1, len(boundaries)):
 
-    test_thetas = np.linspace(0, np.pi, _VERIFICATION_NODES)
-    test_phis = np.linspace(0, 2 * np.pi, _VERIFICATION_NODES)
+        inner_radius = functools.partial(evaluate_legendre_modes, boundaries[i - 1])
+        outer_radius = functools.partial(evaluate_legendre_modes, boundaries[i])
+        length = lambda theta, phi: outer_radius(theta, phi) - inner_radius(theta, phi)
+        print("Testing plasma " + str(i))
 
-    for name, func in zip(names, funcs):
-        stop = False
-        thread = Thread(target=print_loading_message, args=("Checking the " + name, lambda: stop))
-        thread.start()
-        for phi in test_phis:
-            phi = np.array([phi])
-            if (func(test_thetas, phi) < 0).any():
-                stop = True
-                thread.join()
-                quit("Test failed, negative " + name + " detected. Exiting now.")
-        stop = True
-        thread.join()
+        names = ("inner boundary", "outer boundary", "plasma length")
+        funcs = (inner_radius, outer_radius, length)
+
+        test_thetas = np.linspace(0, np.pi, _VERIFICATION_NODES)
+        test_phis = np.linspace(0, 2 * np.pi, _VERIFICATION_NODES)
+
+        for name, func in zip(names, funcs):
+            stop = False
+            thread = Thread(target=print_loading_message, args=("Checking the " + name, lambda: stop))
+            thread.start()
+            for phi in test_phis:
+                phi = np.array([phi])
+                if (func(test_thetas, phi) < 0).any():
+                    stop = True
+                    thread.join()
+                    quit("Test failed, negative " + name + " detected. Exiting now.")
+            stop = True
+            thread.join()
 
 
 def evaluate_legendre_modes(modes, theta, phi):
