@@ -14,6 +14,11 @@ def print_loading_message(message, stop):
     print(message + " : Done!")
 
 
+def print_status_message(plasma_indexes, num_escaped, num_died, ):
+
+    pass
+
+
 def construct_radial_distribution(temperature_profiles, number_density_profiles, reactivity):
 
     # Rename for clarity
