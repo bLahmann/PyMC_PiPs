@@ -2,10 +2,11 @@ import functools
 
 import numpy
 import numpy as np
-from sampling import make_sampler
+from sampling import make_sampler, sample_directions
 from boundaries import evaluate_legendre_modes, verify_boundaries, get_scale_lengths
 from scipy.constants import physical_constants
 from scipy.stats import norm
+from nuclear_reaction import react_particles
 
 from bosch_hale import DDn_reactivity as DDn
 import matplotlib.pyplot as plotter
@@ -105,10 +106,10 @@ def run_simulation(species_masses,
 
     # Create the direction vectors
     if source_particle_direction is None:
-        dir_vectors = _sample_directions(num_source_particles)
+        dir_vectors = sample_directions(num_source_particles)
     else:
-        dir_vectors = _sample_directions(theta_dir=source_particle_direction[0] * np.ones(num_source_particles),
-                                         phi_dir=source_particle_direction[1] * np.ones(num_source_particles))
+        dir_vectors = sample_directions(num_source_particles, fixed_theta=source_particle_direction[0],
+                                        fixed_phi=source_particle_direction[1])
 
     # Sample the energies
     energies = _sample_energies(r_norms, species_masses, temperature_profiles,
@@ -242,22 +243,7 @@ def _sample_positions(source_radial_distribution, num_source_particles, boundari
     return r_norms, pos_vectors, plasma_indexes
 
 
-def _sample_directions(num_source_particles=None, theta_dir=None, phi_dir=None):
 
-    if theta_dir is None:
-        theta_dir_dist = lambda theta: np.sin(theta)
-        theta_dir = make_sampler(theta_dir_dist, 0.0, np.pi)(num_source_particles)
-
-    if phi_dir is None:
-        phi_dir_dist = lambda phi: np.ones(phi.shape)
-        phi_dir = make_sampler(phi_dir_dist, 0.0, 2.*np.pi)(num_source_particles)
-
-    x_dir = np.sin(theta_dir) * np.cos(phi_dir)
-    y_dir = np.sin(theta_dir) * np.sin(phi_dir)
-    z_dir = np.cos(theta_dir)
-    dir_vectors = np.array([x_dir, y_dir, z_dir]).T
-
-    return dir_vectors
 
 
 def _sample_energies(r_norms, species_masses, temperature_profiles, source_nuclear_reaction_masses,
@@ -312,6 +298,25 @@ if __name__ == "__main__":
 
     source_radial_distribution = construct_radial_distribution([temperature, temperature], [density, density], DDn)
 
+    v_a = np.array([
+        [0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1]
+    ])
+
+    v_b = np.array([
+        [-0.1, -0.1, -0.1],
+        [-0.1, -0.1, -0.1],
+        [-0.1, -0.1, -0.1],
+        [-0.1, -0.1, -0.1],
+        [-0.1, -0.1, -0.1]
+    ])
+
+    react_particles((mD, mT, mn, ma), v_a, v_b)
+
+    """
     run_simulation(
         species_masses=[
             (me, mD),
@@ -337,42 +342,10 @@ if __name__ == "__main__":
         num_source_particles=1000,
         source_masses=(mD, mD, mT, mp),
         source_charges=(1, 1, 1, 1),
-        source_particle_direction=None,
+        source_particle_direction=np.deg2rad((90, 78)),
         stopping_power=li_petrasso
     )
-
-
-    """
-    outer_legendre_modes = [
-        (0, 0, 50.0),
-        (0, 2, 30.0)
-    ]
-    
-    inner_legendre_modes = [
-        (0, 0, 10.0)
-    ]
-    
-    outer_radius = functools.partial(evaluate_legendre_modes, outer_legendre_modes)
-    inner_radius = functools.partial(evaluate_legendre_modes, inner_legendre_modes)
-    length = lambda theta, phi: outer_radius(theta, phi) - inner_radius(theta, phi)
-    theta = np.linspace(0, np.pi, 1000)
-    
-    fig = plotter.figure()
-    ax = fig.add_subplot()
-    print(inner_radius(theta, 0.0))
-    plotter.plot(theta, length(theta, 0.0))
-    plotter.show()
     """
 
-    """
-    
-    
-    sampler = make_sampler(radial_distribution, 0, 1)
-    x_s = sampler(1000000)
-    
-    fig = plotter.figure()
-    ax = fig.add_subplot()
-    plotter.hist(x_s, bins=np.linspace(0, 1, 1000))
-    plotter.show()
-    """
+
 

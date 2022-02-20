@@ -25,6 +25,27 @@ def maxwell_energy_sampler(temperature, num_interpolation_points=_DEFAULT_NUM_IN
     return make_sampler(f, 0, 10.0*temperature, num_interpolation_points)
 
 
+def sample_directions(num_samples, fixed_theta=None, fixed_phi=None):
+
+    if fixed_theta is None:
+        theta_dir_dist = lambda theta: np.sin(theta)
+        theta_dir = make_sampler(theta_dir_dist, 0.0, np.pi)(num_samples)
+    else:
+        theta_dir = fixed_theta * np.ones(num_samples)
+
+    if fixed_phi is None:
+        phi_dir_dist = lambda phi: np.ones(phi.shape)
+        phi_dir = make_sampler(phi_dir_dist, 0.0, 2.*np.pi)(num_samples)
+    else:
+        phi_dir = fixed_phi * np.ones(num_samples)
+
+    x_dir = np.sin(theta_dir) * np.cos(phi_dir)
+    y_dir = np.sin(theta_dir) * np.sin(phi_dir)
+    z_dir = np.cos(theta_dir)
+    dir_vectors = np.array([x_dir, y_dir, z_dir]).T
+
+    return dir_vectors
+
 if __name__ == "__main__":
 
     import matplotlib.pyplot as plotter
