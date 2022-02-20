@@ -314,7 +314,7 @@ if __name__ == "__main__":
         [-0.1, -0.1, -0.1]
     ])
 
-    react_particles((mD, mT, mn, ma), v_a, v_b)
+    react_particles((mD, mT, mn, ma), v_a, v_b, np.deg2rad((90, 78)))
 
     """
     run_simulation(
