@@ -16,7 +16,6 @@ def verify_boundaries(boundaries):
         inner_radius = functools.partial(evaluate_legendre_modes, boundaries[i - 1])
         outer_radius = functools.partial(evaluate_legendre_modes, boundaries[i])
         length = lambda theta, phi: outer_radius(theta, phi) - inner_radius(theta, phi)
-        print("Testing plasma " + str(i))
 
         names = ("inner boundary", "outer boundary", "plasma length")
         funcs = (inner_radius, outer_radius, length)
@@ -25,17 +24,10 @@ def verify_boundaries(boundaries):
         test_phis = np.linspace(0, 2 * np.pi, _VERIFICATION_NODES)
 
         for name, func in zip(names, funcs):
-            stop = False
-            thread = Thread(target=print_loading_message, args=("Checking the " + name, lambda: stop))
-            thread.start()
             for phi in test_phis:
                 phi = np.array([phi])
                 if (func(test_thetas, phi) < 0).any():
-                    stop = True
-                    thread.join()
                     quit("Test failed, negative " + name + " detected. Exiting now.")
-            stop = True
-            thread.join()
 
 
 def get_scale_lengths(boundaries):

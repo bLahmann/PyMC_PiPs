@@ -25,6 +25,8 @@ def react_particles(reaction_masses, v_a, v_b, product_direction_lab=None):
         v_c_lab = v_c_cm - v_cm                                     # Product lab velocity (fraction of c)
         dir_vectors_lab = v_c_lab / np.linalg.norm(v_c_lab, axis=1)[:, np.newaxis]  # Direction vectors in Lab Frame
         energy_c_lab = 0.5 * m_c * np.linalg.norm(v_c_lab, axis=1)**2               # Product lab energy (MeV)
+        biases = np.ones(speed_c_cm.size)
+
     else:
         dir_vectors_lab = sample_directions(speed_c_cm.size,
                                             fixed_theta=product_direction_lab[0],
@@ -39,8 +41,9 @@ def react_particles(reaction_masses, v_a, v_b, product_direction_lab=None):
         speed_c_lab = np.linalg.norm(v_cm, axis=1) * np.cos(angle) + \
                       np.sqrt(speed_c_cm**2 + np.linalg.norm(v_cm, axis=1)**2 * (np.cos(angle)**2 - 1))
         energy_c_lab = 0.5 * m_c * speed_c_lab**2
+        biases = (energy_c_lab / energy_c_cm) * np.ones(speed_c_cm.size)        # Correction needed for how we sample
 
-    return dir_vectors_lab, energy_c_lab
+    return dir_vectors_lab, energy_c_lab, biases
 
 
 

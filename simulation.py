@@ -1,7 +1,10 @@
 import functools
+import multiprocessing
+import time
 
 import numpy
 import numpy as np
+import multiprocessing
 from sampling import make_sampler, sample_directions
 from boundaries import evaluate_legendre_modes, verify_boundaries, get_scale_lengths
 from scipy.constants import physical_constants
@@ -13,10 +16,114 @@ from endf import DTn_cross_section as DTn_xs
 import matplotlib.pyplot as plotter
 from stopping_power import li_petrasso
 
+amu_to_g = physical_constants['atomic mass constant'][0] * 1000
 amu_to_mev = physical_constants['atomic mass constant energy equivalent in MeV'][0]
-c = physical_constants['speed of light in vacuum'][0] * 100.0                           # cm/s
-e = physical_constants['elementary charge'][0] * 3e9                                    # statC
-h_bar = physical_constants['reduced Planck constant'][0] * 100 * 100 * 1000             # cm^2 g / s
+c = physical_constants['speed of light in vacuum'][0] * 100.0  # cm/s
+e = physical_constants['elementary charge'][0] * 3e9  # statC
+h_bar = physical_constants['reduced Planck constant'][0] * 100 * 100 * 1000  # cm^2 g / s
+
+
+def run_simulation_multithread(species_masses,
+                               species_charges,
+                               temperature_profiles,
+                               number_density_profiles,
+                               boundaries,
+                               source_radial_distribution,
+                               num_source_particles_per_cpu,
+                               source_masses,
+                               source_charges,
+                               stopping_power,
+                               source_plasma_index=0,
+                               source_particle_direction=None,
+                               secondary_reaction_masses=None,
+                               secondary_reaction_cross_section=None,
+                               secondary_reaction_direction=None,
+                               secondary_energy_bins=None,
+                               max_energy_fraction_loss_per_step=0.01,
+                               step_size_scale_length_fraction=0.01,
+                               min_energy_cutoff=0.1,
+                               num_cpus=multiprocessing.cpu_count() - 1
+                               ):
+    manager = multiprocessing.Manager()
+
+    processes = []
+    source_escape_energies = manager.list()
+    source_escape_weights = manager.list()
+    secondary_birth_energies = manager.list()
+    secondary_birth_weights = manager.list()
+    seeds = np.random.randint(low=0, high=2 ** 32 - 1, size=num_cpus)
+
+    # Start the processes
+    for i in range(num_cpus):
+        processes.append(multiprocessing.Process(target=_single_thread, args=(
+            species_masses, species_charges, temperature_profiles, number_density_profiles, boundaries,
+            source_radial_distribution, num_source_particles_per_cpu, source_masses, source_charges, stopping_power,
+            source_plasma_index, source_particle_direction, secondary_reaction_masses,
+            secondary_reaction_cross_section, secondary_reaction_direction, secondary_energy_bins,
+            max_energy_fraction_loss_per_step, step_size_scale_length_fraction, min_energy_cutoff, seeds[i], num_cpus,
+            source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights)
+                                                 ))
+
+        processes[i].start()
+
+    # Join
+    for i in range(num_cpus):
+        processes[i].join()
+
+    # todo If we binned the data, it needs to be summed
+    if secondary_energy_bins is not None:
+
+        index = range(0, len(secondary_energy_bins)-1)
+        secondary_birth_energies = np.array(secondary_birth_energies)[index]
+        temp_weights = np.zeros(secondary_birth_energies.size)
+        for i in range(num_cpus):
+            index = range(i * (len(secondary_energy_bins) - 1), (i+1) * (len(secondary_energy_bins) - 1))
+            temp_weights += np.array(secondary_birth_weights)[index]
+
+        secondary_birth_energies = secondary_birth_energies.tolist()
+        secondary_birth_weights = temp_weights.tolist()
+
+    return source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights
+
+
+def _single_thread(species_masses,
+                   species_charges,
+                   temperature_profiles,
+                   number_density_profiles,
+                   boundaries,
+                   source_radial_distribution,
+                   num_source_particles_per_cpu,
+                   source_masses,
+                   source_charges,
+                   stopping_power,
+                   source_plasma_index=0,
+                   source_particle_direction=None,
+                   secondary_reaction_masses=None,
+                   secondary_reaction_cross_section=None,
+                   secondary_reaction_direction=None,
+                   secondary_energy_bins=None,
+                   max_energy_fraction_loss_per_step=0.01,
+                   step_size_scale_length_fraction=0.01,
+                   min_energy_cutoff=0.1,
+                   seed=0,
+                   num_cpus=1,
+                   mp_source_escape_energies=None,
+                   mp_source_escape_weights=None,
+                   mp_secondary_birth_energies=None,
+                   mp_secondary_birth_weights=None
+                   ):
+    source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights = \
+        run_simulation(species_masses, species_charges, temperature_profiles, number_density_profiles, boundaries,
+                       source_radial_distribution, num_source_particles_per_cpu, source_masses, source_charges,
+                       stopping_power, source_plasma_index, source_particle_direction, secondary_reaction_masses,
+                       secondary_reaction_cross_section, secondary_reaction_direction, secondary_energy_bins,
+                       max_energy_fraction_loss_per_step, step_size_scale_length_fraction, min_energy_cutoff, seed,
+                       num_cpus)
+
+    mp_source_escape_energies += source_escape_energies
+    mp_source_escape_weights += source_escape_weights
+    mp_secondary_birth_energies += secondary_birth_energies
+    mp_secondary_birth_weights += secondary_birth_weights
 
 
 # Todo multithread
@@ -26,7 +133,7 @@ def run_simulation(species_masses,
                    number_density_profiles,
                    boundaries,
                    source_radial_distribution,
-                   num_source_particles,
+                   num_source_particles_per_cpu,
                    source_masses,
                    source_charges,
                    stopping_power,
@@ -35,9 +142,12 @@ def run_simulation(species_masses,
                    secondary_reaction_masses=None,
                    secondary_reaction_cross_section=None,
                    secondary_reaction_direction=None,
-                   max_energy_fraction_loss_per_step=0.005,
+                   secondary_energy_bins=None,
+                   max_energy_fraction_loss_per_step=0.01,
                    step_size_scale_length_fraction=0.01,
-                   min_energy_cutoff=0.1
+                   min_energy_cutoff=0.1,
+                   seed=0,
+                   num_cpus=1
                    ):
     """ Primary function that runs the simulation
 
@@ -102,38 +212,46 @@ def run_simulation(species_masses,
     # Get scale lengths
     scale_lengths = get_scale_lengths(boundaries)
 
+    # Set the random seed
+    np.random.seed(seed)
+
     # Create the position vectors
     r_norms, pos_vectors, plasma_indexes = \
-        _sample_positions(source_radial_distribution, num_source_particles, boundaries, source_plasma_index)
+        _sample_positions(source_radial_distribution, num_source_particles_per_cpu, boundaries, source_plasma_index)
 
     # Create the direction vectors
     if source_particle_direction is None:
-        dir_vectors = sample_directions(num_source_particles)
+        dir_vectors = sample_directions(num_source_particles_per_cpu)
     else:
-        dir_vectors = sample_directions(num_source_particles, fixed_theta=source_particle_direction[0],
+        dir_vectors = sample_directions(num_source_particles_per_cpu, fixed_theta=source_particle_direction[0],
                                         fixed_phi=source_particle_direction[1])
 
     # Sample the energies
     energies = _sample_energies(r_norms, species_masses, temperature_profiles,
-                                source_masses, num_source_particles, source_plasma_index)
+                                source_masses, num_source_particles_per_cpu, source_plasma_index)
 
-    # Print status update title (todo this won't work when we multi-thread)
-    print("\n--- SOURCE PARTICLE BUDGET ---")
+    # Init the source weights
+    source_weights = (1. / (num_cpus * num_source_particles_per_cpu)) * np.ones(energies.shape)
 
-    secondary_reaction_probability = np.zeros(energies.shape)
-    source_escape_energies = np.array([])
-    secondary_birth_energies = np.array([])
+    # If the user provided bins, we'll histogram the data to save time
+    if secondary_energy_bins is not None:
+        secondary_birth_energies = 0.5 * (secondary_energy_bins[0:-1] + secondary_energy_bins[1:])
+        secondary_birth_weights = np.zeros(secondary_birth_energies.size)
+
+    # Otherwise, we'll just return a list of everything
+    else:
+        secondary_birth_energies = []
+        secondary_birth_weights = []
+
+    # Init the return variables (need to be lists for multiprocessing to return them)
+    source_escape_energies = []
+    source_escape_weights = []
+
     num_escaped = 0
     num_died = 0
     while not energies.size == 0:
 
-        # Print status update
-        debug_string = ""
-        for i in range(len(species_masses)):
-            debug_string += "Plasma Layer %d: %d " % (i+1, sum(plasma_indexes == i))
-        debug_string += "Escaped: %d Dead %d " % (num_escaped, num_died)
-        print("\r", end="")
-        print(debug_string, end="")
+        # todo some kind of multi-threaded progress bar
 
         # Loop through each plasma
         for i in range(len(species_masses)):
@@ -155,40 +273,63 @@ def run_simulation(species_masses,
             # Determine a step size
             dx_scale_length = scale_lengths[i] * step_size_scale_length_fraction
             dx_energy_loss = max_energy_fraction_loss_per_step * energies[mask] / dE_dx
-            dx = numpy.minimum(dx_scale_length, dx_energy_loss)
+            dx = np.minimum(dx_scale_length, dx_energy_loss)
 
             # Calculate energy loss
             dE = dE_dx * dx
 
-            # Todo calculate secondary particle energy, probability
-            # todo get the cross section at the conditions corresponding to the species making the reaction
+            # Handle the secondary reaction
             if secondary_reaction_masses is not None and secondary_reaction_cross_section is not None:
 
                 # Verify that the background species is in this plasma
                 if secondary_reaction_masses[0] in species_masses[i]:
+                    # Rename the masses we'll use for clarity
+                    m_bg = secondary_reaction_masses[0]  # Background particle is assumed to be index 0
+                    m_s = secondary_reaction_masses[1]  # Source particle is assumed to be index 1
 
                     # Identify which species is the background species
-                    background_index = species_masses[i].index(secondary_reaction_masses[0])
+                    background_index = species_masses[i].index(m_bg)
+
+                    # Get the background number density
+                    n_bg = number_density_profiles[i][background_index](r_norms[mask])
 
                     # Get the background velocities
-                    kT = 1e-3 * temperature_profiles[i][background_index](r_norms[mask])            # T in MeV
-                    sigma = np.sqrt(kT / secondary_reaction_masses[0] / amu_to_mev)
+                    kT = 1e-3 * temperature_profiles[i][background_index](r_norms[mask])  # T in MeV
+                    sigma = np.sqrt(kT / m_bg / amu_to_mev)
 
                     v_x_bg = norm.rvs(loc=0.0, scale=sigma, size=len(kT))
                     v_y_bg = norm.rvs(loc=0.0, scale=sigma, size=len(kT))
                     v_z_bg = norm.rvs(loc=0.0, scale=sigma, size=len(kT))
 
                     velocity_background = np.array([v_x_bg.T, v_y_bg.T, v_z_bg.T]).T
+                    speed_background = np.linalg.norm(velocity_background, axis=1)
+                    energy_background = 0.5 * m_bg * amu_to_mev * speed_background ** 2
 
                     # Get the source velocities (assumes source particle is particle C)
-                    speed_source = np.sqrt(2.*energies[mask]/source_masses[2]/amu_to_mev)
+                    speed_source = np.sqrt(2. * energies[mask] / m_s / amu_to_mev)
                     velocity_source = dir_vectors[mask] * speed_source[:, np.newaxis]
 
-                    secondary_dir_vectors, secondary_energies = \
+                    # Get the center of mass energy
+                    energy_cm = energies * (m_bg / (m_bg + m_s)) + \
+                                energy_background * (m_s / (m_bg + m_s))
+
+                    # Calculate the probability of a reaction this step
+                    sigma = 1e-24 * secondary_reaction_cross_section(energy_cm)  # Per cm^2
+                    secondary_reaction_prob = (1.0 - np.exp(-n_bg * sigma * dx)) * source_weights[mask]
+                    source_weights[mask] -= secondary_reaction_prob
+
+                    secondary_dir_vectors, secondary_energies, secondary_biases = \
                         react_particles(secondary_reaction_masses, velocity_background,
                                         velocity_source, secondary_reaction_direction)
 
-                    secondary_birth_energies = np.append(secondary_birth_energies, secondary_energies)
+                    if secondary_energy_bins is not None:
+                        hist = numpy.histogram(secondary_energies, weights=secondary_biases*secondary_reaction_prob,
+                                               bins=secondary_energy_bins)[0]
+                        secondary_birth_weights += hist
+                    else:
+                        secondary_birth_energies += secondary_energies.tolist()
+                        secondary_birth_weights += (secondary_reaction_prob * secondary_biases).tolist()
+
 
             # Take a step
             pos_vectors[mask] += dir_vectors[mask] * dx[:, np.newaxis]
@@ -209,13 +350,14 @@ def run_simulation(species_masses,
             outer_mask = r < outer_radius(theta, phi)
             mask = inner_mask * outer_mask
 
-            plasma_indexes[mask] = i-1
+            plasma_indexes[mask] = i - 1
             r_norms[mask] = (r[mask] - inner_radius(theta[mask], phi[mask])) / \
                             (outer_radius(theta[mask], phi[mask]) - inner_radius(theta[mask], phi[mask]))
 
         # Tally then delete any particle that is no longer in the system
         mask = plasma_indexes == -1
-        source_escape_energies = np.append(source_escape_energies, energies[mask])
+        source_escape_energies += energies[mask].tolist()
+        source_escape_weights += source_weights[mask].tolist()
         num_escaped += np.sum(mask)
 
         r_norms = np.delete(r_norms, mask)
@@ -223,6 +365,7 @@ def run_simulation(species_masses,
         dir_vectors = np.delete(dir_vectors, mask, axis=0)
         energies = np.delete(energies, mask)
         plasma_indexes = np.delete(plasma_indexes, mask)
+        source_weights = np.delete(source_weights, mask)
 
         # Kill any particle below the energy cutoff
         mask = energies < min_energy_cutoff
@@ -233,18 +376,17 @@ def run_simulation(species_masses,
         dir_vectors = np.delete(dir_vectors, mask, axis=0)
         energies = np.delete(energies, mask)
         plasma_indexes = np.delete(plasma_indexes, mask)
+        source_weights = np.delete(source_weights, mask)
 
-    fig = plotter.figure()
-    ax = fig.add_subplot()
+    # If we binned the data, we need to turn it into a list before returning
+    if secondary_energy_bins is not None:
+        secondary_birth_energies = secondary_birth_energies.tolist()
+        secondary_birth_weights = secondary_birth_weights.tolist()
 
-    plotter.hist(secondary_birth_energies, np.linspace(np.min(secondary_birth_energies), np.max(secondary_birth_energies), 1000))
-    plotter.show()
-
-    return source_escape_energies, secondary_birth_energies
+    return source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights
 
 
 def _sample_positions(source_radial_distribution, num_source_particles, boundaries, source_plasma_index):
-
     # Sample the source theta and phi
     inner_radius = functools.partial(evaluate_legendre_modes, boundaries[source_plasma_index])
     outer_radius = functools.partial(evaluate_legendre_modes, boundaries[source_plasma_index + 1])
@@ -252,8 +394,8 @@ def _sample_positions(source_radial_distribution, num_source_particles, boundari
 
     theta_pos_dist = lambda theta: plasma_length(theta, np.array([0.0])) * np.sin(theta)
     theta_pos = make_sampler(theta_pos_dist, 0.0, np.pi)(num_source_particles)
-    phi_pos_dist = lambda phi: plasma_length(np.array([np.pi/2.]), phi)
-    phi_pos = make_sampler(phi_pos_dist, 0.0, 2.*np.pi)(num_source_particles)
+    phi_pos_dist = lambda phi: plasma_length(np.array([np.pi / 2.]), phi)
+    phi_pos = make_sampler(phi_pos_dist, 0.0, 2. * np.pi)(num_source_particles)
 
     # Sample the source radial distribution
     r_norms = make_sampler(source_radial_distribution, 0, 1)(num_source_particles)
@@ -271,12 +413,8 @@ def _sample_positions(source_radial_distribution, num_source_particles, boundari
     return r_norms, pos_vectors, plasma_indexes
 
 
-
-
-
 def _sample_energies(r_norms, species_masses, temperature_profiles, source_nuclear_reaction_masses,
                      num_source_particles, source_plasma_index):
-
     # Unpack the source masses to construct the energy distribution
     m1 = source_nuclear_reaction_masses[0]
     m2 = source_nuclear_reaction_masses[1]
@@ -284,8 +422,8 @@ def _sample_energies(r_norms, species_masses, temperature_profiles, source_nucle
     m4 = source_nuclear_reaction_masses[3]
 
     # Calculate some constants
-    mr_c2 = 1000 * amu_to_mev * m1 * m2 / (m1 + m2)         # Reduced mass (keV)
-    q = 1000 * amu_to_mev * (m1 + m2 - m3 - m4)             # Fusion Q (keV)
+    mr_c2 = 1000 * amu_to_mev * m1 * m2 / (m1 + m2)  # Reduced mass (keV)
+    q = 1000 * amu_to_mev * (m1 + m2 - m3 - m4)  # Fusion Q (keV)
 
     # Figure out where those masses are in the profile list
     index1 = species_masses[source_plasma_index].index(m1)
@@ -300,8 +438,8 @@ def _sample_energies(r_norms, species_masses, temperature_profiles, source_nucle
     v2 = 3.0 * T / (m1 + m2)
 
     # Get the means and the sigmas
-    mu_brisk = 1e-3 * (0.5 * m3 * v2 + m4 * (q + k) / (m3 + m4))        # MeV
-    sig_brisk = 1e-3 * np.sqrt(2.0 * m3 * T * mu_brisk / (m3 + m4))     # MeV
+    mu_brisk = 1e-3 * (0.5 * m3 * v2 + m4 * (q + k) / (m3 + m4))  # MeV
+    sig_brisk = 1e-3 * np.sqrt(2.0 * m3 * T * mu_brisk / (m3 + m4))  # MeV
 
     # Sample the energies
     energies = norm.rvs(loc=mu_brisk, scale=sig_brisk, size=num_source_particles)
@@ -309,53 +447,75 @@ def _sample_energies(r_norms, species_masses, temperature_profiles, source_nucle
     return energies
 
 
-if __name__ == "__main__":
+def _construct_stopping_power():
+    pass
 
+
+if __name__ == "__main__":
     from utils import get_prav_profiles, construct_radial_distribution
 
-    me = physical_constants['electron mass in u'][0]
-    mn = physical_constants['neutron mass in u'][0]
-    mp = physical_constants['proton mass in u'][0]
-    mD = physical_constants['deuteron mass in u'][0]
-    mT = physical_constants['triton mass in u'][0]
-    ma = physical_constants['alpha particle mass in u'][0]
-    m3He = 3.0160293 - 2*physical_constants['electron mass in u'][0]
+    m_e = physical_constants['electron mass in u'][0]
+    m_n = physical_constants['neutron mass in u'][0]
+    m_p = physical_constants['proton mass in u'][0]
+    m_D = physical_constants['deuteron mass in u'][0]
+    m_T = physical_constants['triton mass in u'][0]
+    m_a = physical_constants['alpha particle mass in u'][0]
+    m_3He = 3.0160293 - 2 * physical_constants['electron mass in u'][0]
 
-    density = lambda x: 1e26 * np.ones(x.shape)
-    temperature = get_prav_profiles(5.0, 0.2, 1.0)
+    # Yield Ratio Plot
+    rho = 10.0      # g/cc
+    T = 4.0         # keV
+    n_D = rho / m_D / amu_to_g
+    r = np.logspace(0, 4, 101)
+    r_x_norm = r * np.sqrt(4.0 * np.pi)
+    rho_r = 0.1 * rho * r
 
-    source_radial_distribution = construct_radial_distribution([temperature, temperature], [density, density], DDn)
+    # Uniform profiles
+    density_profile = lambda x: n_D * np.ones(x.shape)
+    temperature_profile = lambda x: T * np.ones(x.shape)
+    source_radial_distribution = construct_radial_distribution(
+        [temperature_profile, temperature_profile], [density_profile, density_profile], DDn)
 
-    run_simulation(
-        species_masses=[
-            (me, mD),
-            (me, mT)
-        ],
-        species_charges=[
-            (-1, 1),
-            (-1, 1)
-        ],
-        temperature_profiles=[
-            (temperature, temperature),
-            (temperature, temperature),
-        ],
-        number_density_profiles=[
-            (density, density),
-            (density, density),
-        ],
-        boundaries=[
-            [(0, 0, 1e-4 * 50.0)],
-            [(0, 0, 1e-4 * 150.0)]
-        ],
-        source_radial_distribution=source_radial_distribution,
-        num_source_particles=10000,
-        source_masses=(mD, mD, mT, mp),
-        source_charges=(1, 1, 1, 1),
-        source_particle_direction=np.deg2rad((90, 78)),
-        stopping_power=li_petrasso,
-        secondary_reaction_masses=(mD, mT, mn, ma),
-        secondary_reaction_cross_section=DTn_xs,
-    )
+    # Loop through the rhoRs
+    yield_ratio = []
+    for r in r_x_norm:
+        source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights = \
+            run_simulation_multithread(
+                species_masses=[
+                    (m_e, m_D)
+                ],
+                species_charges=[
+                    (-1, 1)
+                ],
+                temperature_profiles=[
+                    (temperature_profile, temperature_profile)
+                ],
+                number_density_profiles=[
+                    (density_profile, density_profile)
+                ],
+                boundaries=[
+                    [(0, 0, 1e-4 * r)]
+                ],
+                source_radial_distribution=source_radial_distribution,
+                num_source_particles_per_cpu=1000,
+                source_masses=(m_D, m_D, m_T, m_p),
+                source_charges=(1, 1, 1, 1),
+                source_particle_direction=None,  # np.deg2rad((90, 78)),
+                stopping_power=li_petrasso,
+                secondary_reaction_masses=(m_D, m_T, m_n, m_a),
+                secondary_reaction_cross_section=DTn_xs,
+                secondary_reaction_direction=np.deg2rad((90, 78)),
+                secondary_energy_bins=np.linspace(11, 18, 101)
+            )
 
+        yield_ratio.append(np.sum(np.array(secondary_birth_weights)))
+
+    fig = plotter.figure()
+    ax = fig.add_subplot()
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+
+    plotter.plot(rho_r, yield_ratio)
+    plotter.show()
 
 
