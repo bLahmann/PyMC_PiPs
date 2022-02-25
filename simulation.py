@@ -17,9 +17,11 @@ import matplotlib.pyplot as plotter
 from stopping_power import li_petrasso
 
 amu_to_g = physical_constants['atomic mass constant'][0] * 1000
+amu_to_kg = physical_constants['atomic mass constant'][0]
 amu_to_mev = physical_constants['atomic mass constant energy equivalent in MeV'][0]
 c = physical_constants['speed of light in vacuum'][0] * 100.0  # cm/s
-e = physical_constants['elementary charge'][0] * 3e9  # statC
+e_si = physical_constants['elementary charge'][0]         # C
+e_cgs = physical_constants['elementary charge'][0] * 3e9  # statC
 h_bar = physical_constants['reduced Planck constant'][0] * 100 * 100 * 1000  # cm^2 g / s
 
 
@@ -35,6 +37,7 @@ def run_simulation_multithread(species_masses,
                                stopping_power,
                                source_plasma_index=0,
                                source_particle_direction=None,
+                               magnetic_field_strength=0.0,
                                secondary_reaction_masses=None,
                                secondary_reaction_cross_section=None,
                                secondary_reaction_direction=None,
@@ -58,7 +61,7 @@ def run_simulation_multithread(species_masses,
         processes.append(multiprocessing.Process(target=_single_thread, args=(
             species_masses, species_charges, temperature_profiles, number_density_profiles, boundaries,
             source_radial_distribution, num_source_particles_per_cpu, source_masses, source_charges, stopping_power,
-            source_plasma_index, source_particle_direction, secondary_reaction_masses,
+            source_plasma_index, source_particle_direction, magnetic_field_strength, secondary_reaction_masses,
             secondary_reaction_cross_section, secondary_reaction_direction, secondary_energy_bins,
             max_energy_fraction_loss_per_step, step_size_scale_length_fraction, min_energy_cutoff, seeds[i], num_cpus,
             source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights)
@@ -98,6 +101,7 @@ def _single_thread(species_masses,
                    stopping_power,
                    source_plasma_index=0,
                    source_particle_direction=None,
+                   magnetic_field_strength=0.0,
                    secondary_reaction_masses=None,
                    secondary_reaction_cross_section=None,
                    secondary_reaction_direction=None,
@@ -115,10 +119,10 @@ def _single_thread(species_masses,
     source_escape_energies, source_escape_weights, secondary_birth_energies, secondary_birth_weights = \
         run_simulation(species_masses, species_charges, temperature_profiles, number_density_profiles, boundaries,
                        source_radial_distribution, num_source_particles_per_cpu, source_masses, source_charges,
-                       stopping_power, source_plasma_index, source_particle_direction, secondary_reaction_masses,
-                       secondary_reaction_cross_section, secondary_reaction_direction, secondary_energy_bins,
-                       max_energy_fraction_loss_per_step, step_size_scale_length_fraction, min_energy_cutoff, seed,
-                       num_cpus)
+                       stopping_power, source_plasma_index, source_particle_direction, magnetic_field_strength,
+                       secondary_reaction_masses, secondary_reaction_cross_section, secondary_reaction_direction,
+                       secondary_energy_bins, max_energy_fraction_loss_per_step, step_size_scale_length_fraction,
+                       min_energy_cutoff, seed, num_cpus)
 
     mp_source_escape_energies += source_escape_energies
     mp_source_escape_weights += source_escape_weights
@@ -139,6 +143,7 @@ def run_simulation(species_masses,
                    stopping_power,
                    source_plasma_index=0,
                    source_particle_direction=None,
+                   magnetic_field_strength=0.0,
                    secondary_reaction_masses=None,
                    secondary_reaction_cross_section=None,
                    secondary_reaction_direction=None,
@@ -246,7 +251,6 @@ def run_simulation(species_masses,
     # Init the return variables (need to be lists for multiprocessing to return them)
     source_escape_energies = []
     source_escape_weights = []
-
     num_escaped = 0
     num_died = 0
     while not energies.size == 0:
@@ -269,6 +273,10 @@ def run_simulation(species_masses,
             # Compute dEdx (assumes source particle is particle C)
             dE_dx = -stopping_power(species_masses[i], species_charges[i], field_densities, field_temperatures,
                                     source_masses[2], source_charges[2], energies[mask])[0]
+
+            # Get the velocities (assumes source particle is particle C)
+            speeds = np.sqrt(2. * energies[mask] / source_masses[2] / amu_to_mev)           # Fraction of c
+            velocities = dir_vectors[mask] * speeds[:, np.newaxis]                          # Fraction of c
 
             # Determine a step size
             dx_scale_length = scale_lengths[i] * step_size_scale_length_fraction
@@ -305,10 +313,6 @@ def run_simulation(species_masses,
                     speed_background = np.linalg.norm(velocity_background, axis=1)
                     energy_background = 0.5 * m_bg * amu_to_mev * speed_background ** 2
 
-                    # Get the source velocities (assumes source particle is particle C)
-                    speed_source = np.sqrt(2. * energies[mask] / m_s / amu_to_mev)
-                    velocity_source = dir_vectors[mask] * speed_source[:, np.newaxis]
-
                     # Get the center of mass energy
                     energy_cm = energies * (m_bg / (m_bg + m_s)) + \
                                 energy_background * (m_s / (m_bg + m_s))
@@ -320,7 +324,7 @@ def run_simulation(species_masses,
 
                     secondary_dir_vectors, secondary_energies, secondary_biases = \
                         react_particles(secondary_reaction_masses, velocity_background,
-                                        velocity_source, secondary_reaction_direction)
+                                        velocities, secondary_reaction_direction)
 
                     if secondary_energy_bins is not None:
                         hist = numpy.histogram(secondary_energies, weights=secondary_biases*secondary_reaction_prob,
@@ -334,6 +338,14 @@ def run_simulation(species_masses,
             # Take a step
             pos_vectors[mask] += dir_vectors[mask] * dx[:, np.newaxis]
             energies[mask] -= dE
+
+            q = e_si * source_charges[2]            # C
+            m = source_masses[2] * amu_to_kg        # kg
+            B = magnetic_field_strength             # T
+            velocities[mask, 0] += dir_vectors[mask, 1] * B * q * dx / (m * c)
+            velocities[mask, 1] -= dir_vectors[mask, 0] * B * q * dx / (m * c)
+
+            dir_vectors[mask] = velocities[mask] / np.linalg.norm(velocities[mask], axis=1)[:, np.newaxis]
 
         # Determine what plasma we're in and update r_norms
         plasma_indexes.fill(-1)
@@ -434,7 +446,7 @@ def _sample_energies(r_norms, species_masses, temperature_profiles, source_nucle
                temperature_profiles[source_plasma_index][index2](r_norms))
 
     # Calculate temperature dependent parameters
-    k = (np.pi ** 2 * e ** 4 * mr_c2 / (2 * h_bar ** 2 * c ** 2)) ** (1. / 3.) * T ** (2. / 3.) + (5. / 6.) * T  # keV
+    k = (np.pi ** 2 * e_cgs ** 4 * mr_c2 / (2 * h_bar ** 2 * c ** 2)) ** (1. / 3.) * T ** (2. / 3.) + (5. / 6.) * T  # keV
     v2 = 3.0 * T / (m1 + m2)
 
     # Get the means and the sigmas
@@ -494,13 +506,14 @@ if __name__ == "__main__":
                     (density_profile, density_profile)
                 ],
                 boundaries=[
-                    [(0, 0, 1e-4 * r)]
+                    [(0, 0, 1e-4 * 150.0)]
                 ],
                 source_radial_distribution=source_radial_distribution,
-                num_source_particles_per_cpu=1000,
+                num_source_particles_per_cpu=10000,
                 source_masses=(m_D, m_D, m_T, m_p),
                 source_charges=(1, 1, 1, 1),
                 source_particle_direction=None,  # np.deg2rad((90, 78)),
+                magnetic_field_strength=6000.0,
                 stopping_power=li_petrasso,
                 secondary_reaction_masses=(m_D, m_T, m_n, m_a),
                 secondary_reaction_cross_section=DTn_xs,
@@ -509,6 +522,11 @@ if __name__ == "__main__":
             )
 
         yield_ratio.append(np.sum(np.array(secondary_birth_weights)))
+
+        fig = plotter.figure()
+        ax = fig.add_subplot()
+        plotter.plot(secondary_birth_energies, secondary_birth_weights)
+        plotter.show()
 
     fig = plotter.figure()
     ax = fig.add_subplot()
