@@ -506,7 +506,7 @@ if __name__ == "__main__":
                     (density_profile, density_profile)
                 ],
                 boundaries=[
-                    [(0, 0, 1e-4 * 150.0)]
+                    [(0, 0, 1e-4 * r)]
                 ],
                 source_radial_distribution=source_radial_distribution,
                 num_source_particles_per_cpu=10000,
